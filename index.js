@@ -55,7 +55,10 @@ async function connectDB() {
     }
 
     const isSrvConnection = parsedUri.protocol === 'mongodb+srv:';
-    const useTls = process.env.MONGODB_TLS !== 'false';
+    // Atlas SRV URLs use TLS by default. Railway's internal mongodb:// service
+    // normally does not; MONGODB_TLS can explicitly override either default.
+    const useTls = process.env.MONGODB_TLS === 'true'
+        || (process.env.MONGODB_TLS !== 'false' && isSrvConnection);
     const safeHost = parsedUri.hostname || '(unknown)';
     console.log(`MongoDB config: protocol=${parsedUri.protocol} host=${safeHost} tls=${useTls}`);
 
