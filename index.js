@@ -28,18 +28,21 @@ app.listen(process.env.PORT || 3000, () => console.log('Web server running'));
 // ─── Config ───────────────────────────────────────────────────────────────────
 const TOKEN = process.env.TOKEN || process.env.DISCORD_TOKEN;
 const CLIENT_ID = process.env.CLIENT_ID;
-const MONGODB_URI = process.env.MONGODB_URI || process.env.MONGO_URL;
+const rawMongoUri = process.env.MONGODB_URI || process.env.MONGO_URL;
 const MONGODB_DB_NAME = process.env.MONGODB_DB_NAME || 'ticket-bot';
 
 if (!TOKEN) { console.error('Missing TOKEN'); process.exit(1); }
 if (!CLIENT_ID) { console.error('Missing CLIENT_ID'); process.exit(1); }
-if (!MONGODB_URI) { console.error('Missing MONGODB_URI (or MONGO_URL)'); process.exit(1); }
+if (!rawMongoUri) { console.error('Missing MONGODB_URI (or MONGO_URL)'); process.exit(1); }
 
 // ─── MongoDB ──────────────────────────────────────────────────────────────────
 let db;
 let mongoClient;
 
 async function connectDB() {
+    // Railway variables are sometimes pasted with surrounding quotes or a newline.
+    // Remove only those accidental wrappers; never alter the credentials inside.
+    const MONGODB_URI = rawMongoUri.trim().replace(/^(['"])(.*)\1$/, '$2').trim();
     let parsedUri;
     try {
         parsedUri = new URL(MONGODB_URI);
@@ -53,16 +56,20 @@ async function connectDB() {
 
     const isSrvConnection = parsedUri.protocol === 'mongodb+srv:';
     const useTls = process.env.MONGODB_TLS !== 'false';
+    const safeHost = parsedUri.hostname || '(unknown)';
+    console.log(`MongoDB config: protocol=${parsedUri.protocol} host=${safeHost} tls=${useTls}`);
 
     mongoClient = new MongoClient(MONGODB_URI, {
         appName: 'discord-ticket-bot',
         tls: useTls,
-        serverSelectionTimeoutMS: 15000,
-        connectTimeoutMS: 15000,
+        // Railway can expose both IPv4 and IPv6; Atlas connections are more
+        // reliable from Railway when the driver prefers IPv4.
+        family: 4,
+        serverSelectionTimeoutMS: 30000,
+        connectTimeoutMS: 30000,
         socketTimeoutMS: 45000,
         retryReads: true,
-        retryWrites: true,
-        ...(isSrvConnection ? { srvMaxHosts: 0 } : {})
+        retryWrites: true
     });
 
     await mongoClient.connect();
@@ -698,7 +705,13 @@ connectDB().then(() => {
     client.login(TOKEN);
 }).catch(err => {
     console.error('فشل الاتصال بقاعدة البيانات:', err.message);
-    console.error('تحقق من MONGODB_URI، واسم المستخدم وكلمة المرور، وإضافة 0.0.0.0/0 في MongoDB Atlas Network Access.');
+    if (/ssl|tls|certificate/i.test(err.message)) {
+        console.error('خطأ SSL: استخدم رابط Drivers الذي يبدأ بـ mongodb+srv://، وتأكد من عدم وجود علامات اقتباس حول MONGODB_URI.');
+    } else if (/authentication|bad auth|credentials/i.test(err.message)) {
+        console.error('خطأ تسجيل الدخول: تحقق من مستخدم MongoDB وكلمة المرور وترميز الرموز الخاصة داخل MONGODB_URI.');
+    } else {
+        console.error('تحقق من MONGODB_URI، واسم المستخدم وكلمة المرور، وإضافة 0.0.0.0/0 في MongoDB Atlas Network Access.');
+    }
     process.exit(1);
 });
 
