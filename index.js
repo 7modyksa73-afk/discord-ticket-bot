@@ -28,20 +28,47 @@ app.listen(process.env.PORT || 3000, () => console.log('Web server running'));
 // ─── Config ───────────────────────────────────────────────────────────────────
 const TOKEN = process.env.TOKEN || process.env.DISCORD_TOKEN;
 const CLIENT_ID = process.env.CLIENT_ID;
-const MONGODB_URI = process.env.MONGODB_URI;
+const MONGODB_URI = process.env.MONGODB_URI || process.env.MONGO_URL;
+const MONGODB_DB_NAME = process.env.MONGODB_DB_NAME || 'ticket-bot';
 
 if (!TOKEN) { console.error('Missing TOKEN'); process.exit(1); }
 if (!CLIENT_ID) { console.error('Missing CLIENT_ID'); process.exit(1); }
-if (!MONGODB_URI) { console.error('Missing MONGODB_URI'); process.exit(1); }
+if (!MONGODB_URI) { console.error('Missing MONGODB_URI (or MONGO_URL)'); process.exit(1); }
 
 // ─── MongoDB ──────────────────────────────────────────────────────────────────
 let db;
+let mongoClient;
 
 async function connectDB() {
-    const client = new MongoClient(MONGODB_URI);
-    await client.connect();
-    db = client.db('ticket-bot');
-    console.log('تم الاتصال بقاعدة البيانات.');
+    let parsedUri;
+    try {
+        parsedUri = new URL(MONGODB_URI);
+    } catch {
+        throw new Error('صيغة MONGODB_URI غير صحيحة. استخدم رابط mongodb+srv:// من MongoDB Atlas.');
+    }
+
+    if (!['mongodb:', 'mongodb+srv:'].includes(parsedUri.protocol)) {
+        throw new Error('MONGODB_URI يجب أن يبدأ بـ mongodb:// أو mongodb+srv://.');
+    }
+
+    const isSrvConnection = parsedUri.protocol === 'mongodb+srv:';
+    const useTls = process.env.MONGODB_TLS !== 'false';
+
+    mongoClient = new MongoClient(MONGODB_URI, {
+        appName: 'discord-ticket-bot',
+        tls: useTls,
+        serverSelectionTimeoutMS: 15000,
+        connectTimeoutMS: 15000,
+        socketTimeoutMS: 45000,
+        retryReads: true,
+        retryWrites: true,
+        ...(isSrvConnection ? { srvMaxHosts: 0 } : {})
+    });
+
+    await mongoClient.connect();
+    await mongoClient.db('admin').command({ ping: 1 });
+    db = mongoClient.db(MONGODB_DB_NAME);
+    console.log(`تم الاتصال بقاعدة البيانات (${MONGODB_DB_NAME}).`);
 }
 
 function defaultGuildConfig() {
@@ -671,5 +698,16 @@ connectDB().then(() => {
     client.login(TOKEN);
 }).catch(err => {
     console.error('فشل الاتصال بقاعدة البيانات:', err.message);
+    console.error('تحقق من MONGODB_URI، واسم المستخدم وكلمة المرور، وإضافة 0.0.0.0/0 في MongoDB Atlas Network Access.');
     process.exit(1);
 });
+
+async function shutdown(signal) {
+    console.log(`إيقاف البوت (${signal})...`);
+    client.destroy();
+    if (mongoClient) await mongoClient.close().catch(() => null);
+    process.exit(0);
+}
+
+process.once('SIGINT', () => { void shutdown('SIGINT'); });
+process.once('SIGTERM', () => { void shutdown('SIGTERM'); });
