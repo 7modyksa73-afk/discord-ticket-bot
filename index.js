@@ -464,7 +464,7 @@ client.on('interactionCreate', async (interaction) => {
 
             try {
                 const owner = await client.users.fetch(ownerId);
-                await owner.send('الرجاء التوجه للتذكرة الخاصة بك: #' + channel.name);
+                await owner.send('الرجاء التوجه للتذكرة الخاصة بك: <#' + channel.id + '>');
                 await interaction.reply({ content: '✅ تم إرسال تنبيه خاص لصاحب التذكرة.', flags: 64 });
             } catch (err) {
                 const isDirectMessageBlocked = err?.code === 50007;
