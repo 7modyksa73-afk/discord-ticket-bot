@@ -201,6 +201,10 @@ const commands = [
         .addUserOption(opt => opt.setName('user').setDescription('المستخدم المراد إضافته').setRequired(true)),
 
     new SlashCommandBuilder()
+        .setName('notify-user')
+        .setDescription('إرسال تنبيه خاص لصاحب التذكرة'),
+
+    new SlashCommandBuilder()
         .setName('rename-ticket')
         .setDescription('إعادة تسمية قناة التذكرة الحالية')
         .addStringOption(opt => opt.setName('name').setDescription('الاسم الجديد').setRequired(true)),
@@ -437,6 +441,47 @@ client.on('interactionCreate', async (interaction) => {
             return;
         }
 
+        // /notify-user
+        if (commandName === 'notify-user') {
+            const channel = interaction.channel;
+            const cfg = await loadGuildConfig(guildId);
+            const requester = interaction.member;
+            const isAdmin = requester.permissions.has(PermissionFlagsBits.Administrator);
+            const hasStaffRole = cfg.staffRoleId && requester.roles.cache.has(cfg.staffRoleId);
+            const claimantId = cfg.channelClaimants?.[channel.id];
+            const isClaimant = claimantId === requester.id;
+
+            if (!isAdmin && !hasStaffRole && !isClaimant) {
+                await interaction.reply({ content: '❌ هذا الأمر للإدارة أو الموظف المستلم للتذكرة فقط.', flags: 64 });
+                return;
+            }
+
+            const ownerId = cfg.channelOwners?.[channel.id];
+            if (!ownerId) {
+                await interaction.reply({ content: '❌ لم يتم العثور على صاحب هذه التذكرة.', flags: 64 });
+                return;
+            }
+
+            try {
+                const owner = await client.users.fetch(ownerId);
+                await owner.send(
+                    '📢 **تنبيه من إدارة السيرفر**\n\n' +
+                    'الرجاء التوجه إلى تذكرتك الخاصة: **#' + channel.name + '**\n' +
+                    '🔗 ' + channel.url
+                );
+                await interaction.reply({ content: '✅ تم إرسال تنبيه خاص لصاحب التذكرة.', flags: 64 });
+            } catch (err) {
+                const isDirectMessageBlocked = err?.code === 50007;
+                await interaction.reply({
+                    content: isDirectMessageBlocked
+                        ? '❌ تعذر إرسال الخاص. يبدو أن صاحب التذكرة أغلق الرسائل الخاصة من أعضاء السيرفر.'
+                        : '❌ تعذر إرسال التنبيه الخاص: `' + (err?.message || 'خطأ غير معروف') + '`',
+                    flags: 64
+                });
+            }
+            return;
+        }
+
         // /rename-ticket
         if (commandName === 'rename-ticket') {
             const channel = interaction.channel;
@@ -466,6 +511,7 @@ client.on('interactionCreate', async (interaction) => {
                     { name: '`/rename-ticket`',   value: 'إعادة تسمية قناة التذكرة' },
                     { name: '`/add-user`',        value: 'إضافة مستخدم للتذكرة' },
                     { name: '`/remove-user`',     value: 'إزالة مستخدم من التذكرة' },
+                    { name: '`/notify-user`',     value: 'إرسال تنبيه خاص لصاحب التذكرة' },
                     { name: '`/ticket-stats`',    value: 'الإحصائيات' },
                     { name: '`/reset-stats`',     value: 'إعادة تعيين الإحصائيات' },
                 ).setColor(0xE8B923).setTimestamp()],
